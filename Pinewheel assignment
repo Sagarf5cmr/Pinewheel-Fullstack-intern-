@@ -1,0 +1,140 @@
+const mongoose = require('mongoose');
+
+const ToolSchema = new mongoose.Schema({
+  toolId: String,
+  output: String,
+});
+
+const AgentSchema = new mongoose.Schema({
+  agentId: String,
+  output: String,
+  tools: [ToolSchema],
+});
+
+const GraphSchema = new mongoose.Schema({
+  msgIdx: Number,
+  agents: [AgentSchema],
+  edges: [
+    {
+      source: String, // Node ID
+      target: String, // Node ID
+      relationship: String, // Description of the relationship
+    },
+  ],
+});
+
+module.exports = mongoose.model('Graph', GraphSchema);
+import React, { useEffect, useState } from 'react';
+import CytoscapeComponent from 'react-cytoscapejs';
+import axios from '../utils/api';
+import io from 'socket.io-client';
+
+const Graph = () => {
+  const [elements, setElements] = useState([]);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [selectedEdge, setSelectedEdge] = useState(null);
+
+  const socket = io('http://localhost:3001'); // Connect to backend WebSocket
+
+  useEffect(() => {
+    // Fetch initial graph data
+    const fetchGraphData = async () => {
+      try {
+        const response = await axios.get('/api/graph');
+        setElements(response.data);
+      } catch (error) {
+        console.error('Error fetching graph data:', error);
+      }
+    };
+
+    fetchGraphData();
+
+    // Listen for real-time updates
+    socket.on('updateGraph', (newElements) => {
+      setElements(newElements);
+    });
+
+    return () => socket.disconnect();
+  }, []);
+
+  return (
+    <>
+      <CytoscapeComponent
+        elements={elements}
+        style={{ width: '100%', height: '600px' }}
+        cy={(cy) => {
+          cy.on('tap', 'node', (evt) => setSelectedNode(evt.target.data()));
+          cy.on('tap', 'edge', (evt) => setSelectedEdge(evt.target.data()));
+        }}
+        layout={{ name: 'breadthfirst' }}
+      />
+      {selectedNode && <NodeDetailsModal node={selectedNode} />}
+      {selectedEdge && <EdgeDetailsModal edge={selectedEdge} />}
+    </>
+  );
+};
+
+export default Graph;
+const NodeDetailsModal = ({ node }) => (
+  <div className="modal">
+    <h3>Node Details</h3>
+    <p>ID: {node.id}</p>
+    <p>Output: {node.output}</p>
+    <p>Connected Tools: {JSON.stringify(node.tools)}</p>
+  </div>
+);
+
+const EdgeDetailsModal = ({ edge }) => (
+  <div className="modal">
+    <h3>Edge Details</h3>
+    <p>Source: {edge.source}</p>
+    <p>Target: {edge.target}</p>
+    <p>Relationship: {edge.relationship}</p>
+  </div>
+);
+const express = require('express');
+const mongoose = require('mongoose');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const Graph = require('./models/Graph');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+mongoose.connect('mongodb://localhost:27017/graphDB', { useNewUrlParser: true });
+
+app.get('/api/graph', async (req, res) => {
+  const graph = await Graph.findOne();
+  res.json(graph);
+});
+
+const server = app.listen(3001, () => console.log('Server running on port 3001'));
+const io = new Server(server, { cors: { origin: '*' } });
+
+io.on('connection', (socket) => {
+  console.log('Client connected');
+  socket.on('updateGraph', async (newData) => {
+    // Save or update graph in MongoDB
+    await Graph.updateOne({ msgIdx: newData.msgIdx }, newData, { upsert: true });
+    io.emit('updateGraph', newData);
+  });
+});
+{
+  "msgIdx": 1,
+  "agents": [
+    {
+      "agentId": "A1",
+      "output": "Discovered vulnerability",
+      "tools": [
+        { "toolId": "T1", "output": "Exploit attempted" },
+        { "toolId": "T2", "output": "Report generated" }
+      ]
+    }
+  ],
+  "edges": [
+    { "source": "A1", "target": "T1", "relationship": "Uses tool" },
+    { "source": "A1", "target": "T2", "relationship": "Uses tool" }
+  ]
+}
+
